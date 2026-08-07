@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { apiMessage, resolveApiBaseUrl, resolveRequestPortal } from './api.js';
 
 describe('resolveApiBaseUrl', () => {
-  it('uses the same-origin Netlify proxy in production', () => {
-    expect(resolveApiBaseUrl({ isDevelopment: false, configuredUrl: 'https://different.example/api/v1' })).toBe('/api/v1');
+  it('uses the configured Render API in production', () => {
+    expect(resolveApiBaseUrl({ isDevelopment: false, configuredUrl: 'https://api.example/api/v1/' })).toBe('https://api.example/api/v1');
   });
 
   it('allows a configured API URL during local development', () => {
