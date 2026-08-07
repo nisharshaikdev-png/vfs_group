@@ -49,3 +49,17 @@ services:
         sync: false
       - key: INITIAL_ADMIN_PASSWORD
         sync: false
+      - key: PAYMENT_PROVIDER
+        value: cashfree
+      - key: CASHFREE_ENVIRONMENT
+        value: production
+      - key: CONNECTOR_REGISTRATION_FEE_INR
+        value: 1
+      - key: CONNECTOR_PAYMENT_EXPIRY_MINUTES
+        value: 30
+      - key: CASHFREE_APP_ID
+        sync: false
+      - key: CASHFREE_SECRET_KEY
+        sync: false
+      - key: CASHFREE_WEBHOOK_URL
+        sync: false
