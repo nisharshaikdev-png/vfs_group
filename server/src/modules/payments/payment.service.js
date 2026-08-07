@@ -63,17 +63,24 @@ export async function getRegistrationStatus(registrationId) {
 }
 
 async function createAccountForPaidPayment(paymentId, request) {
-  let payment = await ConnectorRegistrationPayment.findById(paymentId).select('+passwordHash');
-  if (!payment) throw new ApiError(404, 'PAYMENT_REGISTRATION_NOT_FOUND', 'This payment registration was not found.');
-  if (payment.status === 'account_created') return payment;
-  if (payment.status !== 'paid') throw new ApiError(409, 'PAYMENT_NOT_COMPLETED', 'The connector registration payment has not been completed.');
+  let payment = await ConnectorRegistrationPayment.findOneAndUpdate(
+    { _id: paymentId, status: 'paid' },
+    { $set: { status: 'creating_account' }, $unset: { failureReason: '' } },
+    { new: true },
+  ).select('+passwordHash');
+  if (!payment) {
+    payment = await ConnectorRegistrationPayment.findById(paymentId);
+    if (!payment) throw new ApiError(404, 'PAYMENT_REGISTRATION_NOT_FOUND', 'This payment registration was not found.');
+    if (payment.status === 'account_created' || payment.status === 'creating_account') return payment;
+    throw new ApiError(409, 'PAYMENT_NOT_COMPLETED', 'The connector registration payment has not been completed.');
+  }
   try {
     const user = await registerPaidContractor({
       fullName: payment.fullName, mobile: payment.mobile, email: payment.email || '', businessName: payment.businessName || '',
       country: payment.country, city: payment.city, state: payment.state, consent: payment.consent,
     }, payment.passwordHash, request);
     payment = await ConnectorRegistrationPayment.findOneAndUpdate(
-      { _id: payment._id, status: 'paid' },
+      { _id: payment._id, status: 'creating_account' },
       { $set: { status: 'account_created', connectorUser: user._id, accountCreatedAt: new Date() }, $unset: { passwordHash: '', failureReason: '' } },
       { new: true },
     );
@@ -84,7 +91,10 @@ async function createAccountForPaidPayment(paymentId, request) {
     if (existingUser && existingConnector) {
       return ConnectorRegistrationPayment.findByIdAndUpdate(payment._id, { $set: { status: 'account_created', connectorUser: existingUser._id, accountCreatedAt: new Date() }, $unset: { passwordHash: '', failureReason: '' } }, { new: true });
     }
-    await ConnectorRegistrationPayment.updateOne({ _id: payment._id }, { $set: { failureReason: `Payment received, but account creation needs attention: ${error.message}` } });
+    await ConnectorRegistrationPayment.updateOne(
+      { _id: payment._id, status: 'creating_account' },
+      { $set: { status: 'paid', failureReason: `Payment received, but account creation needs attention: ${error.message}` } },
+    );
     throw error;
   }
 }
@@ -94,10 +104,10 @@ export async function completeMockPayment(registrationId, request) {
   const payment = await ConnectorRegistrationPayment.findOne({ registrationId });
   if (!payment) throw new ApiError(404, 'PAYMENT_REGISTRATION_NOT_FOUND', 'This payment registration was not found.');
   if (payment.status === 'payment_pending' && payment.expiresAt <= new Date()) throw new ApiError(410, 'PAYMENT_EXPIRED', 'This payment QR has expired. Start again.');
-  if (payment.status === 'payment_pending') {
-    payment.status = 'paid'; payment.paidAt = new Date(); payment.providerPaymentId = `pay_mock_${randomUUID()}`;
-    await payment.save();
-  }
+  if (payment.status === 'payment_pending') await ConnectorRegistrationPayment.updateOne(
+    { _id: payment._id, status: 'payment_pending' },
+    { $set: { status: 'paid', paidAt: new Date(), providerPaymentId: `pay_mock_${randomUUID()}` } },
+  );
   return publicPayment(await createAccountForPaidPayment(payment._id, request));
 }
 
@@ -106,14 +116,15 @@ async function markCashfreePaymentPaid(registration, providerPayment, request) {
   if (providerPayment.payment_status !== 'SUCCESS' || amountPaise !== registration.amountPaise || providerPayment.payment_currency !== 'INR' || registration.provider !== 'cashfree') {
     throw new ApiError(409, 'PAYMENT_VERIFICATION_FAILED', 'The payment did not match this connector registration.');
   }
-  if (registration.status === 'payment_pending' || registration.status === 'paid') {
-    registration.status = 'paid';
-    registration.paidAt ||= providerPayment.payment_time ? new Date(providerPayment.payment_time) : new Date();
-    registration.providerPaymentId = String(providerPayment.cf_payment_id);
-    await registration.save();
-    return createAccountForPaidPayment(registration._id, request);
-  }
-  return registration;
+  await ConnectorRegistrationPayment.updateOne(
+    { _id: registration._id, status: { $in: ['payment_pending', 'paid'] } },
+    { $set: {
+      status: 'paid',
+      paidAt: registration.paidAt || (providerPayment.payment_time ? new Date(providerPayment.payment_time) : new Date()),
+      providerPaymentId: String(providerPayment.cf_payment_id),
+    } },
+  );
+  return createAccountForPaidPayment(registration._id, request);
 }
 
 export async function confirmCashfreePayment(registrationId, request) {

@@ -243,6 +243,25 @@ describe('portal authentication flows', () => {
     expect(response.body.error.fields).toMatchObject({ service: expect.any(String), 'personal.email': expect.any(String), 'financial.requestedAmount': expect.any(String), 'consents.privacy': expect.any(String) });
   });
 
+  it('creates only one connector account when payment completion arrives concurrently', async () => {
+    const browser = request.agent(app);
+    const registration = { fullName: 'Single Paid Connector', mobile: '919100000099', email: 'single-paid@example.com', password: 'SinglePaidPass123', country: 'India', city: 'Bengaluru', state: 'Karnataka', businessName: 'Single Paid Services', consent: true };
+    const started = await browser.post('/api/v1/payments/connector-registration/start').send(registration);
+    expect(started.status).toBe(201);
+    const csrf = (await browser.get('/api/v1/auth/csrf')).body.data.csrfToken;
+    const endpoint = `/api/v1/payments/connector-registration/${started.body.data.registrationId}/mock-success`;
+
+    const responses = await Promise.all([
+      browser.post(endpoint).set('x-csrf-token', csrf).send(),
+      browser.post(endpoint).set('x-csrf-token', csrf).send(),
+    ]);
+
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(await User.countDocuments({ mobile: registration.mobile })).toBe(1);
+    expect(await Contractor.countDocuments({ user: (await User.findOne({ mobile: registration.mobile }))._id })).toBe(1);
+    expect(await ConnectorRegistrationPayment.exists({ registrationId: started.body.data.registrationId, status: 'account_created' })).toBeTruthy();
+  });
+
   it('validates an approved contractor referral code before application submission', async () => {
     await Contractor.create({ contractorId: 'VFS-CON-TEST-001', referralCode: 'VFSC123456', user: new mongoose.Types.ObjectId(), onboardingStatus: 'approved' });
     const valid = await request(app).post('/api/v1/applications/public/referrals/validate').send({ referralCode: 'vfsc123456' });

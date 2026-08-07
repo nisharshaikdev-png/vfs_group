@@ -19,7 +19,7 @@ const schema = new mongoose.Schema({
   providerQrId: { type: String, index: true, sparse: true },
   providerPaymentId: { type: String, index: true, sparse: true },
   qrImageUrl: String,
-  status: { type: String, enum: ['payment_pending', 'paid', 'account_created', 'failed', 'expired'], default: 'payment_pending', index: true },
+  status: { type: String, enum: ['payment_pending', 'paid', 'creating_account', 'account_created', 'failed', 'expired'], default: 'payment_pending', index: true },
   expiresAt: { type: Date, required: true, index: true },
   paidAt: Date,
   accountCreatedAt: Date,

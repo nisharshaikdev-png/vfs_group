@@ -260,7 +260,23 @@ dashboardRouter.get('/admin/users', requireRole(...ADMIN_ROLES), asyncHandler(as
   const filter = { status: { $ne: 'deleted' } }; const q = String(request.query.q || '').trim();
   if (q) { const regex = new RegExp(escapeRegex(q), 'i'); filter.$or = [{ fullName: regex }, { email: regex }, { mobile: regex }, { referralCode: regex }]; }
   if (request.query.role) { const role = await Role.findOne({ slug: request.query.role }); filter.roles = role?._id || null; }
-  const [users, total] = await Promise.all([User.find(filter).populate('roles', 'name slug').populate('referredBy', 'fullName referralCode').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), User.countDocuments(filter)]);
+  let users; let total;
+  if (request.query.role === 'contractor') {
+    const [result] = await User.aggregate([
+      { $match: filter },
+      // Keep the earliest account as the canonical record when an old payment
+      // race produced two connector users for the same mobile number.
+      { $sort: { createdAt: 1, _id: 1 } },
+      { $group: { _id: '$mobile', user: { $first: '$$ROOT' } } },
+      { $replaceRoot: { newRoot: '$user' } },
+      { $sort: { createdAt: -1, _id: -1 } },
+      { $facet: { users: [{ $skip: (page - 1) * limit }, { $limit: limit }], meta: [{ $count: 'total' }] } },
+    ]);
+    users = await User.populate(result.users, [{ path: 'roles', select: 'name slug' }, { path: 'referredBy', select: 'fullName referralCode' }]);
+    total = result.meta[0]?.total || 0;
+  } else {
+    [users, total] = await Promise.all([User.find(filter).populate('roles', 'name slug').populate('referredBy', 'fullName referralCode').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), User.countDocuments(filter)]);
+  }
   const ids = users.map((user) => user._id); const [loanCounts, customerProfiles, contractorProfiles] = await Promise.all([LoanReferral.aggregate([{ $match: { submittedBy: { $in: ids } } }, { $group: { _id: '$submittedBy', count: { $sum: 1 } } }]), Customer.find({ user: { $in: ids } }).lean(), Contractor.find({ user: { $in: ids } }).lean()]);
   const connectorIds = contractorProfiles.map((profile) => profile._id); const approvedCounts = await Referral.aggregate([{ $match: { connector: { $in: connectorIds }, status: 'approved' } }, { $group: { _id: '$connector', count: { $sum: 1 } } }]);
   const approvalMap = new Map(approvedCounts.map((item) => [String(item._id), item.count])); const loanMap = new Map(loanCounts.map((item) => [String(item._id), item.count]));
