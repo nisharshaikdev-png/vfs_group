@@ -29,6 +29,9 @@ paymentRouter.post('/connector-registration/:registrationId/confirm', registrati
 paymentRouter.post('/connector-registration/:registrationId/mock-success', registrationLimit, requireCsrf, validate(idSchema, 'params'), asyncHandler(async (request, response) => {
   sendData(response, await paymentService.completeMockPayment(request.params.registrationId, request));
 }));
+paymentRouter.get('/cashfree/webhook', (_request, response) => {
+  response.status(200).json({ status: 'ok' });
+});
 paymentRouter.post('/cashfree/webhook', asyncHandler(async (request, response) => {
   await paymentService.processCashfreeWebhook(request);
   response.status(200).json({ status: 'ok' });

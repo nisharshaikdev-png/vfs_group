@@ -13,6 +13,12 @@ describe('platform foundation', () => {
     expect(JSON.stringify(response.body)).not.toContain('JWT');
   });
 
+  it('allows Cashfree to validate the webhook endpoint without processing a payment', async () => {
+    const response = await request(app).get('/api/v1/payments/cashfree/webhook');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: 'ok' });
+  });
+
   it('allows browser requests from the configured frontend origin', async () => {
     const frontendOrigin = new URL(env.CLIENT_URL).origin;
     const response = await request(app).get('/api/v1/health').set('Origin', frontendOrigin);
